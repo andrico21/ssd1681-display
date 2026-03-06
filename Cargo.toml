@@ -6,6 +6,9 @@ description = "no_std async driver for SSD1681-based e-ink displays (GDEY0154D67
 license     = "MIT OR Apache-2.0"
 keywords    = ["embedded", "eink", "ssd1681", "no-std", "display"]
 categories  = ["embedded", "no-std", "hardware-support"]
+repository  = "https://github.com/andrico21/ssd1681-display"
+readme      = "README.md"
+rust-version = "1.85"
 
 [dependencies]
 embedded-hal           = "1.0"
