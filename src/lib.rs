@@ -115,21 +115,43 @@ where
     // -- Convenience refresh methods ----------------------------------------
 
     /// Full-quality refresh (~2089 ms). Reloads LUT, flickers, perfect output.
-    /// Powers down afterwards.
+    /// Powers down afterwards. Writes both RAM banks for clean transitions.
     pub fn full_refresh(&mut self) {
-        self.refresh(RefreshMode::FullF7);
+        self.full_refresh_clean();
+    }
+
+    /// Full-quality refresh that also overwrites the OLD RAM buffer.
+    ///
+    /// Use this after switching screen content (e.g. splash → UI) to prevent
+    /// ghosting from the previous image. Writes the framebuffer to *both*
+    /// SSD1681 RAM banks before triggering the refresh.
+    pub fn full_refresh_clean(&mut self) {
+        self.driver.set_refresh_param_raw(RefreshMode::FullF7 as u8);
+        self.driver.write_ram_both(self.fb.as_bytes());
+        self.driver.trigger_refresh();
+        self.powered = false;
     }
 
     /// Fast differential refresh (~309 ms). No flicker, partial-update quality.
     /// Automatically powers on clock/analog if needed.
+    /// Writes both RAM banks so OLD RAM stays current for the next diff.
     pub fn fast_refresh(&mut self) {
         self.ensure_powered();
-        self.refresh(RefreshMode::BareFast);
+        self.driver.set_refresh_param_raw(RefreshMode::BareFast as u8);
+        self.driver.write_ram_both(self.fb.as_bytes());
+        self.driver.trigger_refresh();
+        self.powered = true;
     }
 
-    /// Self-contained fast refresh (~400 ms). No power-state tracking needed.
+    /// Self-contained differential refresh (~2086 ms, minimal flicker).
+    /// Uses LUT2 + display mode 2 with power-down — better contrast than
+    /// the fast modes while avoiding the heavy full-screen flash.
+    /// Writes both RAM banks so OLD RAM stays current for the next diff.
     pub fn fast_refresh_self_contained(&mut self) {
-        self.refresh(RefreshMode::PoweredFast);
+        self.driver.set_refresh_param_raw(RefreshMode::Mode2CF as u8);
+        self.driver.write_ram_both(self.fb.as_bytes());
+        self.driver.trigger_refresh();
+        self.powered = (RefreshMode::Mode2CF as u8 & 0x03) == 0;
     }
 
     // -- Generic refresh ----------------------------------------------------
