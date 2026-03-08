@@ -1,6 +1,6 @@
 [package]
 name        = "ssd1681-display"
-version     = "0.1.1"
+version     = "0.2.0"
 edition     = "2024"
 description = "no_std async driver for SSD1681-based e-ink displays (GDEY0154D67 and compatible 200x200 panels)"
 license     = "MIT OR Apache-2.0"
@@ -14,3 +14,4 @@ rust-version = "1.85"
 embedded-hal           = "1.0"
 embedded-graphics-core = "0.4.1"
 embassy-time           = "0.5"
+log                    = "0.4"
