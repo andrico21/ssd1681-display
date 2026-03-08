@@ -155,12 +155,12 @@ where
     /// Full init sequence matching M5GFX Panel_GDEW0154D67.
     pub async fn init(&mut self) {
         self.hw_reset().await;
-        self.wait_busy();
+        self.wait_busy(5000).await;
 
         // SW Reset
         self.cmd(CMD_SW_RESET);
         Timer::after(Duration::from_millis(10)).await;
-        self.wait_busy();
+        self.wait_busy(5000).await;
 
         // Gate driver output: 199 lines, scan direction
         self.cmd_data(CMD_GATE_DRIVER_OUTPUT, &[199, 0, 0]);
@@ -182,16 +182,16 @@ where
 
         // Startup power-up
         self.cmd_data(CMD_DISPLAY_UPDATE_CTRL2, &[RefreshMode::Startup as u8]);
-        self.wait_busy();
+        self.wait_busy(5000).await;
     }
 
     // -- RAM writes ---------------------------------------------------------
 
     /// Write full framebuffer to BW RAM. Returns SPI transfer time in ms.
-    pub fn write_ram(&mut self, buf: &[u8; BUF_SIZE]) -> u64 {
-        self.wait_busy();
+    pub async fn write_ram(&mut self, buf: &[u8; BUF_SIZE]) -> u64 {
+        self.wait_busy(5000).await;
         self.set_window_full();
-        self.wait_busy();
+        self.wait_busy(5000).await;
         let t0 = Instant::now();
         self.cmd(CMD_WRITE_RAM_BW);
         self.data(buf);
@@ -202,10 +202,10 @@ where
     ///
     /// Needed before Mode 2 (differential) refreshes so both buffers
     /// contain the current image.
-    pub fn write_ram_both(&mut self, buf: &[u8; BUF_SIZE]) {
-        self.wait_busy();
+    pub async fn write_ram_both(&mut self, buf: &[u8; BUF_SIZE]) {
+        self.wait_busy(5000).await;
         self.set_window_full();
-        self.wait_busy();
+        self.wait_busy(5000).await;
         self.cmd(CMD_WRITE_RAM_BW);
         self.data(buf);
 
@@ -228,60 +228,66 @@ where
 
     /// Send 0x22 + 0x20 and wait for completion (5 s timeout).
     /// Returns busy-wait time in ms.
-    pub fn trigger_refresh(&mut self) -> u64 {
-        self.wait_busy_timeout(5000);
+    pub async fn trigger_refresh(&mut self) -> u64 {
+        self.wait_busy(5000).await;
         self.cmd_data(CMD_DISPLAY_UPDATE_CTRL2, &[self.refresh_param]);
         self.cmd(CMD_MASTER_ACTIVATION);
-        let (_, ms) = self.wait_busy_timeout(5000);
-        ms
+        self.wait_busy(5000).await
     }
 
     /// Send 0x22 + 0x20 without waiting for completion.
-    pub fn trigger_refresh_no_wait(&mut self) {
-        self.wait_busy_timeout(5000);
+    pub async fn trigger_refresh_no_wait(&mut self) {
+        self.wait_busy(5000).await;
         self.cmd_data(CMD_DISPLAY_UPDATE_CTRL2, &[self.refresh_param]);
         self.cmd(CMD_MASTER_ACTIVATION);
     }
 
     /// Write RAM + trigger refresh + wait. Returns (spi_ms, trigger_ms, busy_ms).
-    pub fn update_and_wait(&mut self, buf: &[u8; BUF_SIZE]) -> (u64, u64, u64) {
-        let spi_ms = self.write_ram(buf);
+    pub async fn update_and_wait(&mut self, buf: &[u8; BUF_SIZE]) -> (u64, u64, u64) {
+        let spi_ms = self.write_ram(buf).await;
 
         let t0 = Instant::now();
-        self.trigger_refresh_no_wait();
+        self.trigger_refresh_no_wait().await;
         let trigger_ms = t0.elapsed().as_millis();
 
-        let (_, busy_ms) = self.wait_busy_timeout(5000);
+        let busy_ms = self.wait_busy(5000).await;
 
         (spi_ms, trigger_ms, busy_ms)
     }
 
     /// Enter deep sleep. Requires [`hw_reset`] to wake.
-    pub fn sleep(&mut self) {
-        self.wait_busy();
+    pub async fn sleep(&mut self) {
+        self.wait_busy(5000).await;
         self.cmd_data(CMD_DISPLAY_UPDATE_CTRL2, &[0x03]);
         self.cmd_data(CMD_DEEP_SLEEP, &[0x03]);
     }
 
     // -- Busy polling -------------------------------------------------------
 
-    /// Spin-wait until BUSY goes LOW. Returns wait time in ms.
-    pub fn wait_busy(&mut self) -> u64 {
+    /// Async wait until BUSY goes LOW, yielding to the executor between polls.
+    /// Returns elapsed time in ms. Logs a warning and returns on timeout.
+    pub async fn wait_busy(&mut self, timeout_ms: u64) -> u64 {
         let start = Instant::now();
-        while self.busy.is_high().unwrap_or(true) {}
-        start.elapsed().as_millis()
-    }
-
-    /// Spin-wait with timeout. Returns (was_busy_at_start, elapsed_ms).
-    pub fn wait_busy_timeout(&mut self, timeout_ms: u64) -> (bool, u64) {
-        let start = Instant::now();
-        let was_busy = self.busy.is_high().unwrap_or(false);
-        while self.busy.is_high().unwrap_or(true) {
-            if start.elapsed().as_millis() > timeout_ms {
-                return (was_busy, start.elapsed().as_millis());
+        let deadline = start + Duration::from_millis(timeout_ms);
+        loop {
+            match self.busy.is_high() {
+                Ok(true) => {}  // still busy — keep polling
+                Ok(false) => return start.elapsed().as_millis(),
+                Err(_) => {
+                    // GPIO read error — treat as not-busy to avoid hang
+                    log::warn!("[ssd1681] BUSY pin read error, proceeding");
+                    return start.elapsed().as_millis();
+                }
             }
+            if Instant::now() >= deadline {
+                log::warn!(
+                    "[ssd1681] wait_busy timeout after {}ms",
+                    start.elapsed().as_millis()
+                );
+                return start.elapsed().as_millis();
+            }
+            Timer::after(Duration::from_millis(1)).await;
         }
-        (was_busy, start.elapsed().as_millis())
     }
 
     // -- Low-level SPI helpers ----------------------------------------------

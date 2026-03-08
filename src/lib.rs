@@ -36,15 +36,15 @@
 //!
 //! ```ignore
 //! // Convenience (recommended):
-//! display.full_refresh();              // ~2089 ms, perfect quality
-//! display.fast_refresh();              // ~309 ms, differential, auto power-on
+//! display.full_refresh().await;              // ~2089 ms, perfect quality
+//! display.fast_refresh().await;              // ~309 ms, differential, auto power-on
 //!
 //! // Explicit mode:
-//! display.refresh(RefreshMode::PoweredFast);  // ~400 ms, self-contained
-//! display.refresh(RefreshMode::Mode2CF);      // ~2086 ms, differential with power-down
+//! display.refresh(RefreshMode::PoweredFast).await;  // ~400 ms, self-contained
+//! display.refresh(RefreshMode::Mode2CF).await;      // ~2086 ms, differential with power-down
 //!
 //! // Raw 0x22 parameter (for experimentation):
-//! display.refresh_raw(0xDC);
+//! display.refresh_raw(0xDC).await;
 //! ```
 //!
 //! See [`RefreshMode`] for the full list with measured timings.
@@ -90,9 +90,9 @@ where
     pub async fn init(&mut self) {
         self.driver.init().await;
         self.fb.clear_white();
-        self.driver.write_ram_both(self.fb.as_bytes());
+        self.driver.write_ram_both(self.fb.as_bytes()).await;
         self.driver.set_refresh_mode(RefreshMode::FullF7);
-        self.driver.trigger_refresh();
+        self.driver.trigger_refresh().await;
         self.powered = false;
     }
 
@@ -106,7 +106,7 @@ where
     /// let style = MonoTextStyle::new(&ascii::FONT_10X20, BinaryColor::Off);
     /// Text::new("Hello", Point::new(10, 30), style)
     ///     .draw(display.draw_target())?;
-    /// display.full_refresh();
+    /// display.full_refresh().await;
     /// ```
     pub fn draw_target(&mut self) -> &mut FrameBuf {
         &mut self.fb
@@ -116,8 +116,8 @@ where
 
     /// Full-quality refresh (~2089 ms). Reloads LUT, flickers, perfect output.
     /// Powers down afterwards. Writes both RAM banks for clean transitions.
-    pub fn full_refresh(&mut self) {
-        self.full_refresh_clean();
+    pub async fn full_refresh(&mut self) {
+        self.full_refresh_clean().await;
     }
 
     /// Full-quality refresh that also overwrites the OLD RAM buffer.
@@ -125,21 +125,21 @@ where
     /// Use this after switching screen content (e.g. splash → UI) to prevent
     /// ghosting from the previous image. Writes the framebuffer to *both*
     /// SSD1681 RAM banks before triggering the refresh.
-    pub fn full_refresh_clean(&mut self) {
+    pub async fn full_refresh_clean(&mut self) {
         self.driver.set_refresh_param_raw(RefreshMode::FullF7 as u8);
-        self.driver.write_ram_both(self.fb.as_bytes());
-        self.driver.trigger_refresh();
+        self.driver.write_ram_both(self.fb.as_bytes()).await;
+        self.driver.trigger_refresh().await;
         self.powered = false;
     }
 
     /// Fast differential refresh (~309 ms). No flicker, partial-update quality.
     /// Automatically powers on clock/analog if needed.
     /// Writes both RAM banks so OLD RAM stays current for the next diff.
-    pub fn fast_refresh(&mut self) {
-        self.ensure_powered();
+    pub async fn fast_refresh(&mut self) {
+        self.ensure_powered().await;
         self.driver.set_refresh_param_raw(RefreshMode::BareFast as u8);
-        self.driver.write_ram_both(self.fb.as_bytes());
-        self.driver.trigger_refresh();
+        self.driver.write_ram_both(self.fb.as_bytes()).await;
+        self.driver.trigger_refresh().await;
         self.powered = true;
     }
 
@@ -147,10 +147,10 @@ where
     /// Uses LUT2 + display mode 2 with power-down — better contrast than
     /// the fast modes while avoiding the heavy full-screen flash.
     /// Writes both RAM banks so OLD RAM stays current for the next diff.
-    pub fn fast_refresh_self_contained(&mut self) {
+    pub async fn fast_refresh_self_contained(&mut self) {
         self.driver.set_refresh_param_raw(RefreshMode::Mode2CF as u8);
-        self.driver.write_ram_both(self.fb.as_bytes());
-        self.driver.trigger_refresh();
+        self.driver.write_ram_both(self.fb.as_bytes()).await;
+        self.driver.trigger_refresh().await;
         self.powered = (RefreshMode::Mode2CF as u8 & 0x03) == 0;
     }
 
@@ -162,8 +162,8 @@ where
     /// with the given mode. Power state is updated based on the mode:
     /// modes ending in power-down (bit 0+1 set) clear `powered`; modes
     /// that leave clock/analog on keep it set.
-    pub fn refresh(&mut self, mode: RefreshMode) {
-        self.refresh_raw(mode as u8);
+    pub async fn refresh(&mut self, mode: RefreshMode) {
+        self.refresh_raw(mode as u8).await;
     }
 
     /// Refresh with a raw 0x22 parameter value.
@@ -181,10 +181,10 @@ where
     /// | 2   | Display (Mode 1) |
     /// | 1   | Disable analog |
     /// | 0   | Disable clock |
-    pub fn refresh_raw(&mut self, param: u8) {
+    pub async fn refresh_raw(&mut self, param: u8) {
         self.driver.set_refresh_param_raw(param);
-        self.driver.write_ram(self.fb.as_bytes());
-        self.driver.trigger_refresh();
+        self.driver.write_ram(self.fb.as_bytes()).await;
+        self.driver.trigger_refresh().await;
         // Track power state: bits 0+1 = disable clock+analog
         self.powered = (param & 0x03) == 0;
     }
@@ -192,8 +192,8 @@ where
     // -- Power management ---------------------------------------------------
 
     /// Enter deep sleep. Requires [`init`] to wake again.
-    pub fn sleep(&mut self) {
-        self.driver.sleep();
+    pub async fn sleep(&mut self) {
+        self.driver.sleep().await;
         self.powered = false;
     }
 
@@ -203,10 +203,10 @@ where
     }
 
     /// Ensure clock/analog are on (for bare modes that need it).
-    fn ensure_powered(&mut self) {
+    async fn ensure_powered(&mut self) {
         if !self.powered {
             self.driver.set_refresh_mode(RefreshMode::PowerOn);
-            self.driver.trigger_refresh();
+            self.driver.trigger_refresh().await;
             self.powered = true;
         }
     }
